@@ -2,155 +2,179 @@
 
 ## Deep Learning-Based Image Restoration for VLSI Inspection
 
-VLSI Netra is a deep learning image-restoration project designed to reconstruct high-resolution images from noisy low-resolution inputs.
+VLSI Netra is a deep-learning image-restoration system designed to reconstruct high-resolution grayscale images from noisy low-resolution inputs.
 
-The project uses a lightweight residual convolutional neural network to transform:
+The system uses a residual convolutional neural network to restore image quality while preserving structural and edge information.
 
-- Noisy low-resolution input: 128 x 128
-- Restored output: 256 x 256
-- Image channels: 1 (grayscale)
+---
 
-The trained model was evaluated on a held-out validation set of 320 samples.
+## Selected Model — Experiment 2
 
-## Project Structure
+Experiment 2 is the current validated model selected for the repository based on fair three-model validation.
+
+### Architecture
+
+| Configuration | Value |
+|---|---|
+| Model | KLAResNet |
+| Residual blocks | **12** |
+| Features | **64** |
+| Input channels | **1** |
+| Output channels | **1** |
+| Input resolution | **128 × 128** |
+| Output resolution | **256 × 256** |
+| Parameters | **1,072,129** |
+
+### Training Configuration
+
+| Configuration | Value |
+|---|---|
+| Optimizer | AdamW |
+| Learning rate | 0.0001 |
+| Weight decay | 0.0001 |
+| Betas | (0.9, 0.999) |
+| Batch size | 16 |
+| Epochs | 27 |
+
+### Restoration Loss
+
+The model uses a weighted combination of pixel, structural, and gradient losses:
+
+```text
+L = 0.55 × L_MAE
+  + 0.25 × L_SSIM
+  + 0.20 × L_gradient
+```
+
+where:
+
+- `L_MAE` measures pixel-level reconstruction error.
+- `L_SSIM` is implemented as `1 − SSIM`.
+- `L_gradient` measures horizontal and vertical gradient differences.
+
+---
+
+## Fair Validation Results
+
+The three experiments were compared using the same evaluation framework.
+
+| Model | MAE ↓ | PSNR ↑ | SSIM ↑ | Gradient ↓ |
+|---|---:|---:|---:|---:|
+| Experiment 1 | 0.030537 | 28.3689 | 0.765721 | 0.559840 |
+| **Experiment 2** | **0.030200** | **28.4556** | **0.766358** | **0.548285** |
+| Experiment 3 | 0.032296 | 27.8073 | 0.749315 | 0.531656 |
+
+### Selected Result
+
+**Experiment 2** provides the strongest overall restoration result in the fair comparison.
+
+- **MAE:** 0.030200
+- **PSNR:** 28.4556 dB
+- **SSIM:** 0.766358
+- **Gradient:** 0.548285
+
+Experiment 2 achieves the best MAE, PSNR, and SSIM among the three compared models.
+
+---
+
+## Validation Checkpoint
+
+The published Experiment 2 checkpoint is:
+
+`models/kla_resnet_exp2_best.pt`
+
+Checkpoint metadata:
+
+```text
+Best epoch       : 27
+Best val loss    : 0.09600453078746796
+Parameters       : 1,072,129
+Residual blocks  : 12
+```
+
+The repository checkpoint was verified against the original validated checkpoint using SHA256:
+
+`90724a19cef86f35f2fa8eb5505d6def9b614dda05abe73589595300d8e9441f`
+
+---
+
+## Inference
+
+The published inference pipeline accepts a grayscale NumPy input:
+
+`128 × 128`
+
+and produces:
+
+`256 × 256`
+
+grayscale PNG output.
+
+Example:
+
+```bash
+python src/inference.py \
+    --input_dir /path/to/input \
+    --output_dir /path/to/output \
+    --checkpoint models/kla_resnet_exp2_best.pt
+```
+
+The inference implementation uses strict checkpoint loading to ensure that the published architecture matches the checkpoint.
+
+---
+
+## Repository Structure
 
 ```text
 VLSI Netra/
-|-- src/
-|   |-- train.py
-|   `-- inference.py
-|-- models/
-|   `-- kla_resnet_best.pt
-|-- docs/
-|-- outputs/
-`-- README.md
+├── src/
+│   ├── train.py
+│   └── inference.py
+├── models/
+│   └── kla_resnet_exp2_best.pt
+├── docs/
+│   └── RESULTS.md
+├── outputs/
+├── .gitignore
+└── README.md
 ```
 
-## Model
-
-The project uses the KLAResNet architecture.
-
-### Configuration
-
-| Parameter | Value |
-|---|---:|
-| Input channels | 1 |
-| Output channels | 1 |
-| Features | 64 |
-| Residual blocks | 8 |
-| Total parameters | 776,705 |
-| Trainable parameters | 776,705 |
-
-The model accepts a 128 x 128 noisy image and produces a 256 x 256 restored image.
-
-## Dataset
-
-The training dataset contains paired NoisyLR and ground-truth (GT) images.
-
-| Split | Samples |
-|---|---:|
-| Training | 2,880 |
-| Validation | 320 |
-| Total | 3,200 |
-
-Input and ground-truth dimensions:
-
-```text
-NoisyLR : 1 x 128 x 128
-GT      : 1 x 256 x 256
-```
-
-## Training
-
-| Parameter | Value |
-|---|---:|
-| Device | CUDA |
-| Epochs | 50 |
-| Batch size | 16 |
-| Learning rate | 0.001 |
-| Optimizer | Adam |
-| Best epoch | 14 |
-
-The best checkpoint is models/kla_resnet_best.pt.
-
-The best model was selected using validation loss.
-
-## Validation Results
-
-Final evaluation was performed on all 320 validation samples.
-
-| Metric | Result |
-|---|---:|
-| Mean PSNR | 27.863525 dB |
-| Mean SSIM | 0.751410 |
-| PSNR minimum | 10.856936 dB |
-| PSNR maximum | 37.465970 dB |
-| SSIM minimum | 0.243979 |
-| SSIM maximum | 0.978146 |
-
-## Standalone Inference
-
-The project includes a standalone inference script:
-
-src/inference.py
-
-Run it from a terminal using:
-
-```bash
-python src/inference.py --input_dir <INPUT_DIRECTORY> --output_dir <OUTPUT_DIRECTORY> --checkpoint models/kla_resnet_best.pt
-```
-
-The script was tested on 320 validation inputs.
-
-Verified results:
-
-- Input files processed: 320
-- Output PNG files: 320
-- Output size: 256 x 256
-- Image mode: grayscale (L)
-- Inference return code: 0
-
-## Training Script
-
-The training implementation is provided in src/train.py.
-
-The script contains the model, dataset, loss, training and validation components used for the project.
+---
 
 ## Reproducibility
 
-The following components were independently verified:
+The repository contains:
 
-- Dataset paths
-- Training and validation splits
-- Dataset loading
-- DataLoader
-- Model architecture
-- Model parameter count
-- Best checkpoint
-- Forward inference
-- Restoration loss
-- Validation evaluation
-- Standalone inference script
-- Generated output images
+1. Experiment 2 training source.
+2. Experiment 2 inference source.
+3. The validated Experiment 2 checkpoint.
+4. Fair validation results for Experiments 1–3.
+5. Checkpoint verification information.
 
-The saved best checkpoint is byte-for-byte identical to the validated original checkpoint.
+The training source records epoch-level training and validation history in the checkpoint metadata.
 
-## Output
-
-The restored output images are grayscale PNG files with dimensions 256 x 256.
-
-The standalone inference pipeline successfully generated 320 valid output images from 320 validation inputs.
+---
 
 ## Project Goal
 
-VLSI Netra aims to improve the quality and resolution of degraded VLSI inspection imagery using deep learning-based image restoration, enabling clearer visual information for downstream inspection and analysis.
+The goal of VLSI Netra is to improve the quality of degraded or noisy VLSI inspection imagery through learned image restoration.
+
+The system focuses on:
+
+- Noise reduction
+- Resolution enhancement
+- Structural preservation
+- Edge preservation
+- Quantitative image-quality improvement
+
+---
 
 ## Status
 
-Project pipeline verified successfully.
+**Current repository model: Experiment 2**
 
-Best validation model:
+**Model status: Validated**
 
-- Epoch: 14
-- PSNR: 27.863525 dB
-- SSIM: 0.751410
+**Inference status: Verified**
+
+**Checkpoint status: Verified**

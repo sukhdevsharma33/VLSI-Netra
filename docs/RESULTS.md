@@ -1,86 +1,200 @@
-# VLSI Netra - Experimental Results
+# VLSI Netra — Experimental Results
 
-## Dataset
+## Overview
 
-- Total samples: 3,200
-- Training samples: 2,880
-- Validation samples: 320
-- NoisyLR input: 1 x 128 x 128
-- Ground truth: 1 x 256 x 256
+This document records the validation results of the three model experiments conducted for VLSI Netra.
 
-## Model
+Experiments 1, 2, and 3 were evaluated using the same fair validation framework. Experiment 2 was selected as the current repository model because it achieved the strongest overall combination of MAE, PSNR, and SSIM.
 
-- Architecture: KLAResNet
-- Total parameters: 776,705
-- Trainable parameters: 776,705
-- Input channels: 1
-- Output channels: 1
+---
 
-## Training Configuration
+## Experiment Comparison
 
-| Parameter | Value |
-|---|---:|
-| Device | CUDA |
-| Epochs | 50 |
+| Experiment | MAE ↓ | PSNR ↑ | SSIM ↑ | Gradient ↓ |
+|---|---:|---:|---:|---:|
+| Experiment 1 | 0.030537 | 28.3689 | 0.765721 | 0.559840 |
+| **Experiment 2** | **0.030200** | **28.4556** | **0.766358** | **0.548285** |
+| Experiment 3 | 0.032296 | 27.8073 | 0.749315 | 0.531656 |
+
+### Metric Interpretation
+
+- **MAE:** Lower is better.
+- **PSNR:** Higher is better.
+- **SSIM:** Higher is better.
+- **Gradient:** Lower indicates lower gradient reconstruction error.
+
+---
+
+## Experiment 1
+
+Experiment 1 was the initial baseline restoration model.
+
+Its fair validation results were:
+
+- MAE: **0.030537**
+- PSNR: **28.3689 dB**
+- SSIM: **0.765721**
+- Gradient: **0.559840**
+
+Experiment 1 is retained as part of the experimental history but is not the current repository model.
+
+---
+
+## Experiment 2 — Selected Model
+
+Experiment 2 increased the residual capacity of the restoration network and was selected after fair validation.
+
+### Architecture
+
+| Configuration | Value |
+|---|---|
+| Model | KLAResNet |
+| Residual blocks | **12** |
+| Features | **64** |
+| Input channels | **1** |
+| Output channels | **1** |
+| Input resolution | **128 × 128** |
+| Output resolution | **256 × 256** |
+| Parameters | **1,072,129** |
+
+### Training Configuration
+
+| Configuration | Value |
+|---|---|
+| Optimizer | AdamW |
+| Learning rate | 0.0001 |
+| Weight decay | 0.0001 |
+| Betas | (0.9, 0.999) |
 | Batch size | 16 |
-| Learning rate | 0.001 |
-| Optimizer | Adam |
-| Best epoch | 14 |
+| Epochs | 27 |
 
-## Best Checkpoint
+### Loss Function
 
-The best validation checkpoint is:
+The restoration objective is:
 
-models/kla_resnet_best.pt
+```text
+L = 0.55 × L_MAE
+  + 0.25 × L_SSIM
+  + 0.20 × L_gradient
+```
 
-Checkpoint epoch: 14
+where the structural component is implemented as:
 
-Best validation loss: 0.07613037005066872
+```text
+L_SSIM = 1 − SSIM(prediction, target)
+```
 
-Validation pixel loss: 0.03204418243840337
+The gradient loss compares horizontal and vertical image gradients using L1 distance.
 
-Validation SSIM loss: 0.2524751156568527
+### Best Validation Checkpoint
 
-## Full Validation Evaluation
+- Best epoch: **27**
+- Best validation loss: **0.09600453078746796**
 
-The best checkpoint was evaluated on all 320 validation samples.
+### Fair Validation Metrics
 
-| Metric | Result |
-|---|---:|
-| Mean PSNR | 27.863525 dB |
-| Mean SSIM | 0.751410 |
-| PSNR minimum | 10.856936 dB |
-| PSNR maximum | 37.465970 dB |
-| SSIM minimum | 0.243979 |
-| SSIM maximum | 0.978146 |
+- MAE: **0.030200**
+- PSNR: **28.4556 dB**
+- SSIM: **0.766358**
+- Gradient: **0.548285**
 
-## Standalone Inference Verification
+---
 
-The standalone inference script was executed independently from the training notebook.
+## Experiment 3
 
-- Script: src/inference.py
-- Input files: 320
-- Output files: 320
-- Device: CUDA
-- Return code: 0
+Experiment 3 was evaluated using the same fair validation framework.
 
-## Output Verification
+Its results were:
 
-All 320 generated PNG files were verified.
+- MAE: **0.032296**
+- PSNR: **27.8073 dB**
+- SSIM: **0.749315**
+- Gradient: **0.531656**
 
-- File count: 320
-- Image size: 256 x 256
-- Image mode: L (grayscale)
-- Invalid images: 0
+Experiment 3 did not exceed Experiment 2 on the primary overall restoration metrics.
 
-## Integrity Verification
+---
 
-The repository copies of train.py and inference.py were verified using SHA256 hashes.
+## Why Experiment 2 Was Selected
 
-The repository copy of kla_resnet_best.pt was also verified using SHA256.
+Experiment 2 achieved:
 
-The model copy matched the original checkpoint byte-for-byte.
+1. The lowest MAE among the three experiments.
+2. The highest PSNR among the three experiments.
+3. The highest SSIM among the three experiments.
 
-## Conclusion
+Although Experiment 3 produced a lower gradient metric, its MAE, PSNR, and SSIM were worse than Experiment 2.
 
-The complete VLSI Netra pipeline was successfully restored, trained, evaluated, and independently verified. The best model was obtained at epoch 14 and achieved a mean PSNR of 27.863525 dB and mean SSIM of 0.751410 on the 320-sample validation set.
+Therefore, Experiment 2 was selected as the best overall restoration model.
+
+---
+
+## Checkpoint Verification
+
+Published checkpoint:
+
+`models/kla_resnet_exp2_best.pt`
+
+Verified properties:
+
+- 12 residual blocks
+- 1,072,129 parameters
+- Best epoch 27
+- Best validation loss 0.09600453078746796
+- Checkpoint contains training history metadata
+
+SHA256:
+
+```text
+90724a19cef86f35f2fa8eb5505d6def9b614dda05abe73589595300d8e9441f
+```
+
+The repository checkpoint SHA256 matches the original validated Experiment 2 checkpoint.
+
+---
+
+## Architecture Verification
+
+The repository training implementation was tested against the published checkpoint using strict state-dictionary loading.
+
+Verification results:
+
+- Parameter count: **1,072,129**
+- Missing checkpoint keys: **0**
+- Unexpected checkpoint keys: **0**
+- Input tensor: **1 × 1 × 128 × 128**
+- Output tensor: **1 × 1 × 256 × 256**
+- Output range: **[0, 1]**
+
+The architecture and checkpoint are therefore compatible.
+
+---
+
+## Inference Verification
+
+The published `src/inference.py` was tested using the Experiment 2 checkpoint.
+
+The verified pipeline is:
+
+```text
+128 × 128 .npy
+        ↓
+Experiment 2 KLAResNet
+        ↓
+256 × 256 grayscale PNG
+```
+
+The generated PNG was verified as:
+
+- Resolution: **256 × 256**
+- Mode: **L (grayscale)**
+- Data type: **uint8**
+- Pixel range: **0–255**
+
+---
+
+## Final Status
+
+**Experiment 2 is the selected and validated repository model.**
+
+The model checkpoint, training source, inference source, architecture, and validation results have been verified for consistency.

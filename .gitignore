@@ -32,6 +32,6 @@ datasets/
 validation_outputs/
 validation_outputs_script/
 
-# Model checkpoints other than the selected best model
+# Model checkpoints
 models/*.pt
-!models/kla_resnet_best.pt
+!models/kla_resnet_exp2_best.pt

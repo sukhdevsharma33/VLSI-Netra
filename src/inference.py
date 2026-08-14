@@ -14,16 +14,22 @@ from PIL import Image
 class ResidualBlock(torch.nn.Module):
 
     def __init__(self, features=64):
+
         super().__init__()
 
         self.block = torch.nn.Sequential(
+
             torch.nn.Conv2d(
                 features,
                 features,
                 kernel_size=3,
                 padding=1
             ),
-            torch.nn.ReLU(inplace=True),
+
+            torch.nn.ReLU(
+                inplace=True
+            ),
+
             torch.nn.Conv2d(
                 features,
                 features,
@@ -44,8 +50,9 @@ class KLAResNet(torch.nn.Module):
         in_channels=1,
         out_channels=1,
         features=64,
-        num_blocks=8
+        num_blocks=12
     ):
+
         super().__init__()
 
         self.head = torch.nn.Conv2d(
@@ -70,14 +77,19 @@ class KLAResNet(torch.nn.Module):
         )
 
         self.upsample = torch.nn.Sequential(
+
             torch.nn.Conv2d(
                 features,
                 features * 4,
                 kernel_size=3,
                 padding=1
             ),
+
             torch.nn.PixelShuffle(2),
-            torch.nn.ReLU(inplace=True)
+
+            torch.nn.ReLU(
+                inplace=True
+            )
         )
 
         self.tail = torch.nn.Conv2d(
@@ -109,16 +121,19 @@ class KLAResNet(torch.nn.Module):
 
 
 # ============================================================
-# INFERENCE
+# LOAD MODEL
 # ============================================================
 
-def load_model(checkpoint_path, device):
+def load_model(
+    checkpoint_path,
+    device
+):
 
     model = KLAResNet(
         in_channels=1,
         out_channels=1,
         features=64,
-        num_blocks=8
+        num_blocks=12
     )
 
     checkpoint = torch.load(
@@ -127,20 +142,26 @@ def load_model(checkpoint_path, device):
     )
 
     model.load_state_dict(
-        checkpoint["model_state_dict"]
+        checkpoint["model_state_dict"],
+        strict=True
     )
 
     model = model.to(device)
+
     model.eval()
 
     return model
 
 
+# ============================================================
+# LOAD INPUT
+# ============================================================
+
 def load_npy(path):
 
-    array = np.load(path)
-
-    array = array.astype(
+    array = np.load(
+        path
+    ).astype(
         np.float32
     )
 
@@ -148,15 +169,107 @@ def load_npy(path):
         array
     )
 
-    # Expected shape: [1,128,128]
     if tensor.ndim == 2:
+
         tensor = tensor.unsqueeze(0)
 
-    # Expected final shape: [1,1,128,128]
+    if tensor.ndim != 3:
+
+        raise ValueError(
+            f"Expected input with shape "
+            f"(H,W) or (C,H,W), got "
+            f"{tuple(tensor.shape)}"
+        )
+
     tensor = tensor.unsqueeze(0)
+
+    if tensor.shape[1] != 1:
+
+        raise ValueError(
+            f"Expected 1 input channel, "
+            f"got {tensor.shape[1]}"
+        )
 
     return tensor
 
+
+# ============================================================
+# SAVE OUTPUT
+# ============================================================
+
+def save_prediction(
+    prediction,
+    output_path
+):
+
+    prediction = (
+        prediction
+        .squeeze()
+        .cpu()
+        .numpy()
+    )
+
+    prediction = np.clip(
+        prediction,
+        0.0,
+        1.0
+    )
+
+    prediction = (
+        prediction * 255.0
+    ).round().astype(
+        np.uint8
+    )
+
+    Image.fromarray(
+        prediction
+    ).save(
+        output_path
+    )
+
+
+# ============================================================
+# SINGLE IMAGE INFERENCE
+# ============================================================
+
+def predict_file(
+    model,
+    input_path,
+    output_path,
+    device
+):
+
+    input_tensor = load_npy(
+        input_path
+    ).to(device)
+
+    with torch.no_grad():
+
+        prediction = model(
+            input_tensor
+        )
+
+    if tuple(prediction.shape) != (
+        1,
+        1,
+        256,
+        256
+    ):
+
+        raise RuntimeError(
+            "Unexpected model output shape: "
+            f"{tuple(prediction.shape)}"
+        )
+
+    save_prediction(
+        prediction,
+        output_path
+    )
+
+
+# ============================================================
+# DIRECTORY INFERENCE
+# ============================================================
 
 def run_inference(
     model,
@@ -183,61 +296,39 @@ def run_inference(
         len(files)
     )
 
-    with torch.no_grad():
+    for index, filename in enumerate(files):
 
-        for index, filename in enumerate(files):
+        input_path = os.path.join(
+            input_dir,
+            filename
+        )
 
-            input_path = os.path.join(
-                input_dir,
-                filename
+        sample_id = os.path.splitext(
+            filename
+        )[0]
+
+        output_path = os.path.join(
+            output_dir,
+            f"{sample_id}.png"
+        )
+
+        predict_file(
+            model,
+            input_path,
+            output_path,
+            device
+        )
+
+        if (
+            (index + 1) % 100 == 0
+            or
+            (index + 1) == len(files)
+        ):
+
+            print(
+                f"Processed "
+                f"{index + 1}/{len(files)}"
             )
-
-            sample_id = os.path.splitext(
-                filename
-            )[0]
-
-            input_tensor = load_npy(
-                input_path
-            ).to(device)
-
-            prediction = model(
-                input_tensor
-            )
-
-            prediction = (
-                prediction
-                .squeeze()
-                .cpu()
-                .numpy()
-            )
-
-            prediction = (
-                prediction * 255.0
-            ).round().astype(
-                np.uint8
-            )
-
-            output_path = os.path.join(
-                output_dir,
-                f"{sample_id}.png"
-            )
-
-            Image.fromarray(
-                prediction
-            ).save(
-                output_path
-            )
-
-            if (
-                (index + 1) % 100 == 0
-                or
-                (index + 1) == len(files)
-            ):
-
-                print(
-                    f"Processed "
-                    f"{index + 1}/{len(files)}"
-                )
 
 
 # ============================================================
@@ -246,7 +337,12 @@ def run_inference(
 
 def main():
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=(
+            "VLSI Netra Experiment 2 "
+            "image restoration inference"
+        )
+    )
 
     parser.add_argument(
         "--input_dir",
@@ -271,7 +367,10 @@ def main():
         else "cpu"
     )
 
-    print("Device:", device)
+    print(
+        "Device:",
+        device
+    )
 
     model = load_model(
         args.checkpoint,

@@ -6,8 +6,9 @@ import argparse
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+import torch.nn.functional as F
 
+from torch.utils.data import Dataset, DataLoader
 from pytorch_msssim import ssim
 
 
@@ -17,12 +18,7 @@ from pytorch_msssim import ssim
 
 class KLADataset(Dataset):
 
-    def __init__(
-        self,
-        ids,
-        noisy_dir,
-        gt_dir
-    ):
+    def __init__(self, ids, noisy_dir, gt_dir):
         self.ids = ids
         self.noisy_dir = noisy_dir
         self.gt_dir = gt_dir
@@ -46,15 +42,11 @@ class KLADataset(Dataset):
 
         noisy = np.load(
             noisy_path
-        ).astype(
-            np.float32
-        )
+        ).astype(np.float32)
 
         gt = np.load(
             gt_path
-        ).astype(
-            np.float32
-        )
+        ).astype(np.float32)
 
         if noisy.ndim == 2:
             noisy = noisy[None, ...]
@@ -62,19 +54,10 @@ class KLADataset(Dataset):
         if gt.ndim == 2:
             gt = gt[None, ...]
 
-        noisy = torch.from_numpy(
-            noisy
-        )
+        noisy = torch.from_numpy(noisy)
+        gt = torch.from_numpy(gt)
 
-        gt = torch.from_numpy(
-            gt
-        )
-
-        return (
-            noisy,
-            gt,
-            sample_id
-        )
+        return noisy, gt, sample_id
 
 
 # ============================================================
@@ -83,10 +66,7 @@ class KLADataset(Dataset):
 
 class ResidualBlock(nn.Module):
 
-    def __init__(
-        self,
-        features=64
-    ):
+    def __init__(self, features=64):
         super().__init__()
 
         self.block = nn.Sequential(
@@ -98,9 +78,7 @@ class ResidualBlock(nn.Module):
                 padding=1
             ),
 
-            nn.ReLU(
-                inplace=True
-            ),
+            nn.ReLU(inplace=True),
 
             nn.Conv2d(
                 features,
@@ -111,7 +89,6 @@ class ResidualBlock(nn.Module):
         )
 
     def forward(self, x):
-
         return x + self.block(x)
 
 
@@ -122,8 +99,9 @@ class KLAResNet(nn.Module):
         in_channels=1,
         out_channels=1,
         features=64,
-        num_blocks=8
+        num_blocks=12
     ):
+
         super().__init__()
 
         self.head = nn.Conv2d(
@@ -135,9 +113,7 @@ class KLAResNet(nn.Module):
 
         self.body = nn.Sequential(
             *[
-                ResidualBlock(
-                    features
-                )
+                ResidualBlock(features)
                 for _ in range(num_blocks)
             ]
         )
@@ -160,9 +136,7 @@ class KLAResNet(nn.Module):
 
             nn.PixelShuffle(2),
 
-            nn.ReLU(
-                inplace=True
-            )
+            nn.ReLU(inplace=True)
         )
 
         self.tail = nn.Conv2d(
@@ -197,12 +171,53 @@ class KLAResNet(nn.Module):
 # LOSS
 # ============================================================
 
+def gradient_loss(prediction, target):
+
+    pred_x = (
+        prediction[:, :, :, 1:]
+        -
+        prediction[:, :, :, :-1]
+    )
+
+    pred_y = (
+        prediction[:, :, 1:, :]
+        -
+        prediction[:, :, :-1, :]
+    )
+
+    target_x = (
+        target[:, :, :, 1:]
+        -
+        target[:, :, :, :-1]
+    )
+
+    target_y = (
+        target[:, :, 1:, :]
+        -
+        target[:, :, :-1, :]
+    )
+
+    loss_x = F.l1_loss(
+        pred_x,
+        target_x
+    )
+
+    loss_y = F.l1_loss(
+        pred_y,
+        target_y
+    )
+
+    return (
+        loss_x + loss_y
+    ) / 2.0
+
+
 def restoration_loss(
     prediction,
     target
 ):
 
-    pixel_loss = nn.functional.l1_loss(
+    pixel_loss = F.l1_loss(
         prediction,
         target
     )
@@ -214,29 +229,34 @@ def restoration_loss(
         size_average=True
     )
 
+    grad_loss = gradient_loss(
+        prediction,
+        target
+    )
+
     total_loss = (
-        0.5 * pixel_loss
+        0.55 * pixel_loss
         +
-        0.5 * structural_loss
+        0.25 * structural_loss
+        +
+        0.20 * grad_loss
     )
 
     return (
         total_loss,
         pixel_loss,
-        structural_loss
+        structural_loss,
+        grad_loss
     )
 
 
 # ============================================================
-# LOAD IDS
+# IDS
 # ============================================================
 
 def load_ids(path):
 
-    with open(
-        path,
-        "r"
-    ) as f:
+    with open(path, "r") as f:
 
         return [
             line.strip()
@@ -249,9 +269,9 @@ def load_ids(path):
 # VALIDATION
 # ============================================================
 
-def evaluate_validation_loss(
+def evaluate(
     model,
-    val_loader,
+    loader,
     device
 ):
 
@@ -260,11 +280,13 @@ def evaluate_validation_loss(
     total_loss = 0.0
     total_pixel = 0.0
     total_ssim = 0.0
+    total_gradient = 0.0
+
     batches = 0
 
     with torch.no_grad():
 
-        for noisy, gt, _ in val_loader:
+        for noisy, gt, _ in loader:
 
             noisy = noisy.to(
                 device,
@@ -276,35 +298,30 @@ def evaluate_validation_loss(
                 non_blocking=True
             )
 
-            prediction = model(
-                noisy
+            prediction = model(noisy)
+
+            (
+                loss_total,
+                pixel,
+                structural,
+                grad
+            ) = restoration_loss(
+                prediction,
+                gt
             )
 
-            loss_total, loss_pixel, loss_structural = (
-                restoration_loss(
-                    prediction,
-                    gt
-                )
-            )
-
-            total_loss += (
-                loss_total.item()
-            )
-
-            total_pixel += (
-                loss_pixel.item()
-            )
-
-            total_ssim += (
-                loss_structural.item()
-            )
+            total_loss += loss_total.item()
+            total_pixel += pixel.item()
+            total_ssim += structural.item()
+            total_gradient += grad.item()
 
             batches += 1
 
     return (
         total_loss / batches,
         total_pixel / batches,
-        total_ssim / batches
+        total_ssim / batches,
+        total_gradient / batches
     )
 
 
@@ -320,15 +337,7 @@ def train(args):
         else "cpu"
     )
 
-    print(
-        "Device:",
-        device
-    )
-
-    os.makedirs(
-        args.model_dir,
-        exist_ok=True
-    )
+    print("Device:", device)
 
     train_ids = load_ids(
         args.train_ids
@@ -370,25 +379,44 @@ def train(args):
         in_channels=1,
         out_channels=1,
         features=64,
-        num_blocks=8
+        num_blocks=12
     ).to(device)
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=args.learning_rate
+        lr=0.0001,
+        weight_decay=0.0001,
+        betas=(0.9, 0.999),
+        eps=1e-8
     )
 
     best_val_loss = float("inf")
     best_epoch = 0
 
-    best_model_path = os.path.join(
+    # --------------------------------------------------------
+    # HISTORY
+    # --------------------------------------------------------
+
+    history = {
+        "epoch": [],
+        "train_loss": [],
+        "train_pixel_loss": [],
+        "train_ssim_loss": [],
+        "train_gradient_loss": [],
+        "val_loss": [],
+        "val_pixel_loss": [],
+        "val_ssim_loss": [],
+        "val_gradient_loss": []
+    }
+
+    os.makedirs(
         args.model_dir,
-        "kla_resnet_best.pt"
+        exist_ok=True
     )
 
-    final_model_path = os.path.join(
+    best_path = os.path.join(
         args.model_dir,
-        "kla_resnet_final.pt"
+        "kla_resnet_exp2_best.pt"
     )
 
     for epoch in range(
@@ -396,12 +424,16 @@ def train(args):
         args.epochs + 1
     ):
 
-        start_time = time.time()
+        start = time.time()
 
         model.train()
 
-        running_train_loss = 0.0
-        train_batches = 0
+        train_total = 0.0
+        train_pixel = 0.0
+        train_ssim = 0.0
+        train_gradient = 0.0
+
+        batches = 0
 
         for noisy, gt, _ in train_loader:
 
@@ -419,51 +451,62 @@ def train(args):
                 set_to_none=True
             )
 
-            prediction = model(
-                noisy
-            )
+            prediction = model(noisy)
 
-            loss_total, _, _ = (
-                restoration_loss(
-                    prediction,
-                    gt
-                )
+            (
+                loss_total,
+                pixel,
+                structural,
+                grad
+            ) = restoration_loss(
+                prediction,
+                gt
             )
 
             loss_total.backward()
 
             optimizer.step()
 
-            running_train_loss += (
-                loss_total.item()
-            )
+            train_total += loss_total.item()
+            train_pixel += pixel.item()
+            train_ssim += structural.item()
+            train_gradient += grad.item()
 
-            train_batches += 1
+            batches += 1
 
-        train_loss = (
-            running_train_loss
-            /
-            train_batches
+        train_total /= batches
+        train_pixel /= batches
+        train_ssim /= batches
+        train_gradient /= batches
+
+        (
+            val_loss,
+            val_pixel,
+            val_ssim,
+            val_gradient
+        ) = evaluate(
+            model,
+            val_loader,
+            device
         )
 
-        val_loss, val_pixel, val_ssim = (
-            evaluate_validation_loss(
-                model,
-                val_loader,
-                device
-            )
-        )
+        # ----------------------------------------------------
+        # UPDATE HISTORY
+        # ----------------------------------------------------
 
-        elapsed = (
-            time.time()
-            -
-            start_time
-        )
+        history["epoch"].append(epoch)
+        history["train_loss"].append(train_total)
+        history["train_pixel_loss"].append(train_pixel)
+        history["train_ssim_loss"].append(train_ssim)
+        history["train_gradient_loss"].append(train_gradient)
+
+        history["val_loss"].append(val_loss)
+        history["val_pixel_loss"].append(val_pixel)
+        history["val_ssim_loss"].append(val_ssim)
+        history["val_gradient_loss"].append(val_gradient)
 
         improved = (
-            val_loss
-            <
-            best_val_loss
+            val_loss < best_val_loss
         )
 
         if improved:
@@ -474,23 +517,59 @@ def train(args):
             torch.save(
                 {
                     "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                    "val_pixel_loss": val_pixel,
-                    "val_ssim_loss": val_ssim
+
+                    "model_state_dict":
+                        model.state_dict(),
+
+                    "optimizer_state_dict":
+                        optimizer.state_dict(),
+
+                    "train_loss":
+                        train_total,
+
+                    "train_pixel_loss":
+                        train_pixel,
+
+                    "train_ssim_loss":
+                        train_ssim,
+
+                    "train_gradient_loss":
+                        train_gradient,
+
+                    "val_loss":
+                        val_loss,
+
+                    "val_pixel_loss":
+                        val_pixel,
+
+                    "val_ssim_loss":
+                        val_ssim,
+
+                    "val_gradient_loss":
+                        val_gradient,
+
+                    "best_epoch":
+                        best_epoch,
+
+                    "best_val_loss":
+                        best_val_loss,
+
+                    "history":
+                        history
                 },
-                best_model_path
+                best_path
             )
+
+        elapsed = time.time() - start
 
         print(
             f"Epoch {epoch:02d}/{args.epochs} | "
-            f"Train Loss: {train_loss:.6f} | "
-            f"Val Loss: {val_loss:.6f} | "
-            f"Val Pixel: {val_pixel:.6f} | "
-            f"Val SSIM: {val_ssim:.6f} | "
-            f"Time: {elapsed:.1f}s"
+            f"Train {train_total:.6f} | "
+            f"Val {val_loss:.6f} | "
+            f"MAE {val_pixel:.6f} | "
+            f"SSIM loss {val_ssim:.6f} | "
+            f"Grad {val_gradient:.6f} | "
+            f"{elapsed:.1f}s"
             +
             (
                 "  <-- BEST"
@@ -498,17 +577,6 @@ def train(args):
                 else ""
             )
         )
-
-    torch.save(
-        {
-            "epoch": args.epochs,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "best_epoch": best_epoch,
-            "best_val_loss": best_val_loss
-        },
-        final_model_path
-    )
 
     print(
         "\n========== TRAINING COMPLETE =========="
@@ -525,13 +593,8 @@ def train(args):
     )
 
     print(
-        "Best model:",
-        best_model_path
-    )
-
-    print(
-        "Final model:",
-        final_model_path
+        "Best checkpoint:",
+        best_path
     )
 
 
@@ -551,19 +614,13 @@ def main():
     parser.add_argument(
         "--epochs",
         type=int,
-        default=50
+        default=27
     )
 
     parser.add_argument(
         "--batch_size",
         type=int,
         default=16
-    )
-
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=0.001
     )
 
     parser.add_argument(
@@ -574,7 +631,7 @@ def main():
 
     args = parser.parse_args()
 
-    args.dataset_dir = os.path.join(
+    dataset_dir = os.path.join(
         args.base_dir,
         "Datasets",
         "train_extracted",
@@ -582,12 +639,12 @@ def main():
     )
 
     args.noisy_dir = os.path.join(
-        args.dataset_dir,
+        dataset_dir,
         "NoisyLR"
     )
 
     args.gt_dir = os.path.join(
-        args.dataset_dir,
+        dataset_dir,
         "GT"
     )
 

@@ -178,3 +178,33 @@ The system focuses on:
 **Inference status: Verified**
 
 **Checkpoint status: Verified**
+
+---
+
+## Experimental Development & Hardware
+
+VLSI Netra was developed through comparative experiments rather than selecting a single architecture without validation.
+
+Three model configurations were evaluated. Experiment 1 established the baseline, Experiment 2 increased residual-network depth, and Experiment 3 evaluated an alternative configuration.
+
+### Hardware
+
+- **GPU:** NVIDIA Tesla T4
+- **Framework:** PyTorch
+- **Training protocol:** Minimum 50 epochs
+- **Batch size:** 16
+- **Optimizer:** AdamW
+- **Learning rate:** 0.0001
+- **Weight decay:** 0.0001
+
+### Experiment progression
+
+| Model | Residual Blocks | Parameters | MAE | PSNR | SSIM | Gradient |
+|---|---:|---:|---:|---:|---:|---:|
+| Experiment 1 | 8 | 776,705 | 0.030537 | 28.3689 | 0.765721 | 0.559840 |
+| **Experiment 2** | **12** | **1,072,129** | **0.030200** | **28.4556** | **0.766358** | **0.548285** |
+| Experiment 3 | — | — | 0.032296 | 27.8073 | 0.749315 | 0.531656 |
+
+Experiment 2 was selected because it achieved the best overall combination of MAE, PSNR and SSIM on the common validation protocol.
+
+See `docs/EXPERIMENTS.md` for the complete experimental evolution and methodology.

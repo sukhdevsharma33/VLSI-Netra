@@ -1,5 +1,67 @@
 # VLSI Netra
 
+## Competition Inference
+
+The repository provides the required competition entry point:
+
+`python run.py <input-dir> <output-dir>`
+
+The inference pipeline runs completely offline and does not require internet access, API keys, additional model downloads, user interaction, or manual configuration.
+
+The validated model checkpoint is included in:
+
+`models/kla_resnet_exp2_best.pt`
+
+### Input
+
+The script reads all `.npy` files from the input directory.
+
+- Format: `.npy`
+- Data type: `float32`
+- Grayscale
+- Expected input resolution: `128 x 128`
+- Accepted shape: `(128, 128)` or `(1, 128, 128)`
+
+### Output
+
+One restored `.npy` file is generated for every input file.
+
+- Same filename as the input
+- Grayscale
+- Shape: `(256, 256)`
+- Data type: `float32`
+- Values in `[0, 1]`
+- No NaN or Inf values
+
+Example:
+
+`python run.py input output`
+
+produces:
+
+`input/001116.npy -> output/001116.npy`
+
+### GPU Execution
+
+The script automatically uses CUDA when an NVIDIA GPU is available and otherwise falls back to CPU.
+
+The competition entry point was successfully tested on:
+
+- NVIDIA Tesla T4
+- PyTorch 2.11.0
+- CUDA 12.8
+
+### Installation
+
+Install dependencies with:
+
+`pip install -r requirements.txt`
+
+No additional model download is required.
+
+---
+
+
 ## Deep Learning-Based Image Restoration for VLSI Inspection
 
 VLSI Netra is a deep-learning image-restoration system designed to reconstruct high-resolution grayscale images from noisy low-resolution inputs.
@@ -34,7 +96,8 @@ Experiment 2 is the current validated model selected for the repository based on
 | Weight decay | 0.0001 |
 | Betas | (0.9, 0.999) |
 | Batch size | 16 |
-| Epochs | 27 |
+| Total training epochs | **50** |
+| Best validation epoch | **27** |
 
 ### Restoration Loss
 
@@ -87,6 +150,7 @@ Checkpoint metadata:
 
 ```text
 Best epoch       : 27
+Total epochs     : 50
 Best val loss    : 0.09600453078746796
 Parameters       : 1,072,129
 Residual blocks  : 12
@@ -191,7 +255,8 @@ Three model configurations were evaluated. Experiment 1 established the baseline
 
 - **GPU:** NVIDIA Tesla T4
 - **Framework:** PyTorch
-- **Training protocol:** Minimum 50 epochs
+- **Training protocol:** 50 total epochs
+- **Best validation epoch:** 27
 - **Batch size:** 16
 - **Optimizer:** AdamW
 - **Learning rate:** 0.0001
